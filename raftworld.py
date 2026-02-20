@@ -1077,5 +1077,9 @@ def format_time(seconds):
 
 # Запуск бота
 if __name__ == "__main__":
+    token = os.getenv('TOKEN')
+    if not token:
+        print("❌ ОШИБКА: Токен не найден в переменных окружения!")
+        exit(1)
+    bot.run(token)
 
-    bot.run('MTQ3Mzk5NjgxMzk3ODgyODg3MQ.G-yu-6.6HVd1hLvZ0Q4GDJkEMLJ0WxsTR4GCT1MQP_tJE')
