@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta
 import asyncio
 import json
+import sys
 import os
 
 # Настройка логирования
@@ -1078,8 +1079,15 @@ def format_time(seconds):
 # Запуск бота
 if __name__ == "__main__":
     token = os.getenv('TOKEN')
+    print(f"🔍 Токен загружен: {'Да' if token else 'НЕТ'}")
+    print(f"🔍 Длина токена: {len(token) if token else 0}")
+    
     if not token:
         print("❌ ОШИБКА: Токен не найден в переменных окружения!")
-        exit(1)
-    bot.run(token)
-
+        print("📝 Проверь переменную TOKEN в Railway Variables")
+        sys.exit(1)
+    
+    try:
+        bot.run(token)
+    except Exception as e:
+        print(f"❌ Ошибка при запуске: {e}")
