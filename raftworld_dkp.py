@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import asyncio
 import json
 import os
@@ -54,42 +54,6 @@ user_channels = {}
 # Множество для отслеживания обрабатываемых пользователей
 processing_users = set()
 
-# Список ролей, которые НЕ НАДО выдавать автоматически
-EXCLUDED_AUTO_ROLES = [
-    ROLE_D_OWNER_ID,
-    ROLE_D_ADMIN_ID,
-    ROLE_D_MLADMIN_ID,
-    ROLE_D_GLMODER_ID,
-    ROLE_D_STMODER_ID,
-    ROLE_D_MODER_ID,
-    ROLE_ADMIN_ID,
-    ROLE_WARN_1_ID,
-    ROLE_WARN_2_ID,
-    ROLE_WARN_3_ID
-]
-
-# Список ролей, которые могут использовать команды (D.owner и выше)
-ALLOWED_ROLES_FOR_COMMANDS = [
-    ROLE_D_OWNER_ID,
-    ROLE_D_ADMIN_ID,
-    ROLE_D_MLADMIN_ID,
-    ROLE_D_GLMODER_ID,
-    ROLE_D_STMODER_ID,
-    ROLE_D_MODER_ID,
-    ROLE_ADMIN_ID
-]
-
-# Список ролей, которые могут видеть личные каналы
-ROLES_CAN_SEE_PRIVATE_CHANNELS = [
-    ROLE_D_OWNER_ID,
-    ROLE_D_ADMIN_ID,
-    ROLE_D_MLADMIN_ID,
-    ROLE_D_GLMODER_ID,
-    ROLE_D_STMODER_ID,
-    ROLE_D_MODER_ID,
-    ROLE_ADMIN_ID
-]
-
 # Загрузка варнов из файла
 def load_warns():
     global warns
@@ -125,7 +89,7 @@ async def load_channels():
 async def on_ready():
     print(f'✅ Бот {bot.user} успешно запущен!')
     print(f'📋 Серверов: {len(bot.guilds)}')
-    print(f'👥 Команды загружены: !accept, !варн, !варны, !снятьварны, !чсп, !бан, !снят')
+    print(f'👥 Команды загружены: !accept, !варн, !варны, !унварн, !снятьварны, !чсп, !бан, !снят')
     print(f'📝 Категория для личных каналов: {PRIVATE_CATEGORY_ID}')
     print(f'📋 Канал логов: {LOG_CHANNEL_ID}')
     load_warns()
@@ -188,13 +152,11 @@ async def create_private_channel(member, source="unknown"):
         processing_users.add(member.id)
         print(f"🔧 Создание канала для {member.name}")
         
-        # Проверяем существующий канал
         if member.id in user_channels:
             existing_channel = member.guild.get_channel(user_channels[member.id])
             if existing_channel:
                 return existing_channel
         
-        # Получаем категорию
         category = member.guild.get_channel(PRIVATE_CATEGORY_ID)
         if not category:
             for cat in member.guild.categories:
@@ -204,11 +166,9 @@ async def create_private_channel(member, source="unknown"):
             if not category:
                 category = await member.guild.create_category("🔒 Личные каналы DKP")
         
-        # Создаем имя канала
         clean_name = member.name.replace(" ", "_").replace(".", "").replace(",", "")
         channel_name = f"📌┃{clean_name}"
         
-        # Проверяем существование
         for channel in category.text_channels:
             if channel.name == channel_name or clean_name.lower() in channel.name.lower():
                 user_channels[member.id] = channel.id
@@ -217,7 +177,6 @@ async def create_private_channel(member, source="unknown"):
         if len(channel_name) > 32:
             channel_name = channel_name[:32]
         
-        # Настраиваем права
         overwrites = {
             member.guild.default_role: discord.PermissionOverwrite(read_messages=False),
             member: discord.PermissionOverwrite(
@@ -235,7 +194,9 @@ async def create_private_channel(member, source="unknown"):
         }
         
         # Добавляем права для админов
-        for role_id in ROLES_CAN_SEE_PRIVATE_CHANNELS:
+        admin_roles = [ROLE_D_OWNER_ID, ROLE_D_ADMIN_ID, ROLE_D_MLADMIN_ID, 
+                       ROLE_D_GLMODER_ID, ROLE_D_STMODER_ID, ROLE_D_MODER_ID, ROLE_ADMIN_ID]
+        for role_id in admin_roles:
             role = member.guild.get_role(role_id)
             if role:
                 overwrites[role] = discord.PermissionOverwrite(
@@ -244,7 +205,6 @@ async def create_private_channel(member, source="unknown"):
                     read_message_history=True
                 )
         
-        # СОЗДАЕМ КАНАЛ
         channel = await category.create_text_channel(
             name=channel_name,
             overwrites=overwrites,
@@ -253,7 +213,6 @@ async def create_private_channel(member, source="unknown"):
         
         user_channels[member.id] = channel.id
         
-        # Приветствие
         embed = discord.Embed(
             title="🎉 Добро пожаловать в личный канал!",
             description=f"Привет, {member.mention}!\n\n"
@@ -312,16 +271,17 @@ def has_permission(member):
     if member.guild_permissions.administrator:
         return True
     for role in member.roles:
-        if role.id in ALLOWED_ROLES_FOR_COMMANDS:
+        if role.id in [ROLE_D_OWNER_ID, ROLE_D_ADMIN_ID, ROLE_D_MLADMIN_ID, 
+                       ROLE_D_GLMODER_ID, ROLE_D_STMODER_ID, ROLE_D_MODER_ID, ROLE_ADMIN_ID]:
             return True
     return False
 
 def has_unpunish_permission(member):
-    """Проверяет, есть ли у пользователя право на снятие (только D.owner)"""
+    """Проверяет, есть ли у пользователя право на снятие (только D.owner и Admin)"""
     if member.guild_permissions.administrator:
         return True
     for role in member.roles:
-        if role.id == ROLE_D_OWNER_ID:
+        if role.id in [ROLE_D_OWNER_ID, ROLE_ADMIN_ID]:
             return True
     return False
 
@@ -343,7 +303,7 @@ async def update_warn_role(member):
     user_id = member.id
     warn_count = warns.get(str(user_id), 0)
     
-    # Удаляем старые варн роли
+    # Удаляем все старые варн роли
     warn_roles = [ROLE_WARN_1_ID, ROLE_WARN_2_ID, ROLE_WARN_3_ID]
     roles_to_remove = []
     for role_id in warn_roles:
@@ -354,7 +314,7 @@ async def update_warn_role(member):
     if roles_to_remove:
         await member.remove_roles(*roles_to_remove, reason="Обновление варн роли")
     
-    # Выдаем новую роль
+    # Выдаем новую роль в зависимости от количества варнов
     if warn_count >= 3:
         role = member.guild.get_role(ROLE_WARN_3_ID)
         if role:
@@ -388,31 +348,15 @@ async def on_member_join(member):
             await log_to_channel(
                 guild=member.guild,
                 title="🆕 НОВЫЙ УЧАСТНИК",
-                description=f"{member.mention} получил роли:\n" +
-                           f"{wait_role.mention if wait_role else ''}\n" +
-                           f"{exam_role.mention if exam_role else ''}"
+                description=f"{member.mention} получил роли ожидания"
             )
             
     except Exception as e:
         print(f"❌ Ошибка при выдаче ролей: {str(e)}")
 
-@bot.event
-async def on_member_update(before, after):
-    """Отслеживаем изменение ролей"""
-    if after.id in processing_users:
-        return
-    
-    try:
-        # Здесь можно добавить логику для автоматического создания канала
-        # при получении определенной роли
-        pass
-            
-    except Exception as e:
-        print(f"❌ Ошибка в on_member_update: {str(e)}")
-
 @bot.command(name='accept')
 async def accept(ctx, *, args: str = ""):
-    """Выдача роли (аналог !accept из первого бота)"""
+    """Принятие пользователя"""
     if not has_permission(ctx.author):
         await ctx.send("❌ У вас нет прав для использования этой команды!")
         return
@@ -452,8 +396,7 @@ async def accept(ctx, *, args: str = ""):
             guild=ctx.guild,
             title="✅ ACCEPT",
             description=f"**Модератор:** {ctx.author.mention}\n"
-                       f"**Пользователь:** {member.mention}\n"
-                       f"**Действие:** Пользователь принят, создан личный канал",
+                       f"**Пользователь:** {member.mention}",
             color=discord.Color.green()
         )
         
@@ -503,19 +446,52 @@ async def warn(ctx, *, args: str = ""):
     
     await ctx.send(embed=embed)
     
-    # Если 3/3 варнов, уведомляем D.owner
+    # Если 3/3 варнов - кикаем с сервера и очищаем варны
     if new_warns >= 3:
-        d_owner_role = ctx.guild.get_role(ROLE_D_OWNER_ID)
-        if d_owner_role:
-            warn_embed = discord.Embed(
-                title="⚠️ ВНИМАНИЕ! 3/3 ВАРНОВ",
-                description=f"У {member.mention} набралось 3/3 варнов!\n"
-                           f"**Причина последнего:** {reason}\n"
-                           f"**Модератор:** {ctx.author.mention}\n\n"
-                           f"Необходимо принять меры!",
+        try:
+            # Кикаем пользователя
+            await member.kick(reason=f"3/3 варнов от {ctx.author}: {reason}")
+            
+            # Очищаем варны
+            if user_id in warns:
+                del warns[user_id]
+                save_warns()
+            
+            # Удаляем варн роли
+            warn_roles = [ROLE_WARN_1_ID, ROLE_WARN_2_ID, ROLE_WARN_3_ID]
+            roles_to_remove = []
+            for role_id in warn_roles:
+                role = ctx.guild.get_role(role_id)
+                if role and role in member.roles:
+                    roles_to_remove.append(role)
+            
+            if roles_to_remove:
+                await member.remove_roles(*roles_to_remove, reason="Кик за 3/3 варнов")
+            
+            # Удаляем личный канал
+            await delete_private_channel(member)
+            
+            # Уведомление о кике
+            kick_embed = discord.Embed(
+                title="👢 КИК",
+                description=f"{member.mention} кикнут за 3/3 варнов",
                 color=discord.Color.red()
             )
-            await ctx.send(f"{d_owner_role.mention}", embed=warn_embed)
+            kick_embed.add_field(name="Причина", value=reason, inline=False)
+            kick_embed.add_field(name="Модератор", value=ctx.author.mention, inline=False)
+            await ctx.send(embed=kick_embed)
+            
+            await log_to_channel(
+                guild=ctx.guild,
+                title="👢 КИК ЗА 3/3 ВАРНОВ",
+                description=f"**Модератор:** {ctx.author.mention}\n"
+                           f"**Пользователь:** {member.mention}\n"
+                           f"**Причина:** {reason}",
+                color=discord.Color.red()
+            )
+            
+        except Exception as e:
+            await ctx.send(f"❌ Ошибка при кике: {str(e)}")
     
     await log_to_channel(
         guild=ctx.guild,
@@ -525,6 +501,47 @@ async def warn(ctx, *, args: str = ""):
                    f"**Причина:** {reason}\n"
                    f"**Всего варнов:** {new_warns}/3",
         color=discord.Color.orange()
+    )
+
+@bot.command(name='унварн')
+async def unwarn(ctx, *, args: str = ""):
+    """Снимает один варн с пользователя"""
+    if not has_permission(ctx.author):
+        await ctx.send("❌ У вас нет прав для использования этой команды!")
+        return
+    
+    member = await get_member_from_args(ctx, args.split() if args else [])
+    
+    if not member:
+        await ctx.send("❌ Укажите пользователя через @ или ответьте на его сообщение!")
+        return
+    
+    user_id = str(member.id)
+    current_warns = warns.get(user_id, 0)
+    
+    if current_warns <= 0:
+        await ctx.send(f"ℹ️ У {member.mention} нет варнов!")
+        return
+    
+    new_warns = current_warns - 1
+    if new_warns == 0:
+        if user_id in warns:
+            del warns[user_id]
+    else:
+        warns[user_id] = new_warns
+    
+    save_warns()
+    await update_warn_role(member)
+    
+    await ctx.send(f"✅ У {member.mention} снят один варн. Осталось: {new_warns}/3")
+    
+    await log_to_channel(
+        guild=ctx.guild,
+        title="✅ УНВАРН",
+        description=f"**Модератор:** {ctx.author.mention}\n"
+                   f"**Пользователь:** {member.mention}\n"
+                   f"**Осталось варнов:** {new_warns}/3",
+        color=discord.Color.green()
     )
 
 @bot.command(name='варны')
@@ -551,9 +568,9 @@ async def warns_list(ctx, *, args: str = ""):
 
 @bot.command(name='снятьварны')
 async def remove_warns(ctx, *, args: str = ""):
-    """Снимает все варны с пользователя (только D.owner)"""
+    """Снимает все варны с пользователя (только D.owner и Admin)"""
     if not has_unpunish_permission(ctx.author):
-        await ctx.send("❌ У вас нет прав для использования этой команды! Только D.owner.")
+        await ctx.send("❌ У вас нет прав для использования этой команды! Только D.owner и Admin.")
         return
     
     member = await get_member_from_args(ctx, args.split() if args else [])
@@ -609,7 +626,6 @@ async def csp(ctx, *, args: str = ""):
         elif len(words) > 0 and not ctx.message.mentions:
             reason = args
     
-    # Здесь можно добавить логику ЧСП
     await ctx.send(f"⛔ {member.mention} отправлен в ЧСП. Причина: {reason}")
     
     await log_to_channel(
@@ -671,7 +687,7 @@ async def ban(ctx, *, args: str = ""):
 async def unpunish(ctx, *, args: str = ""):
     """Снятие наказания"""
     if not has_unpunish_permission(ctx.author):
-        await ctx.send("❌ У вас нет прав для использования этой команды! Только D.owner.")
+        await ctx.send("❌ У вас нет прав для использования этой команды! Только D.owner и Admin.")
         return
     
     member = await get_member_from_args(ctx, args.split() if args else [])
@@ -718,6 +734,7 @@ if __name__ == "__main__":
     
     if token:
         print(f"🔍 Длина токена: {len(token)}")
+        print(f"🔍 Первые 20 символов: {token[:20]}")
     else:
         print("❌ Токен не найден!")
         sys.exit(1)
