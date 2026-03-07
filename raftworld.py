@@ -9,6 +9,7 @@ import os
 import random
 import string
 import re
+import aiohttp
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -44,7 +45,11 @@ ROLE_WARN_3_ID = 1474433541352984639      # ID роли "3/3 варнов"
 # ========== ID КАНАЛОВ ==========
 PRIVATE_CATEGORY_ID = 1474383930563100672  # Категория для личных каналов
 LOG_CHANNEL_ID = 1474386900923191517       # Канал для логов
-APPLICATION_CHANNEL_ID = 1468558816936329359  # Канал для заявок (СОЗДАЙ!)
+APPLICATION_CHANNEL_ID = 1468558816936329359  # Канал для заявок (ТВОЙ!)
+
+# ========== URL САЙТА ==========
+SITE_URL = "http://kp.wh30686.web3.maze-tech.ru"
+API_URL = f"{SITE_URL}/api"
 
 # ========== ФАЙЛЫ ==========
 WARNS_FILE = "warns.json"
@@ -110,19 +115,53 @@ def save_applications():
     with open(APPLICATIONS_FILE, 'w', encoding='utf-8') as f:
         json.dump(applications, f, ensure_ascii=False, indent=4)
 
-# ========== ГЕНЕРАЦИЯ ДАННЫХ ==========
-def generate_email(name):
-    """Генерирует email на основе имени"""
-    clean_name = name.lower().replace(' ', '.').replace('@', '')
-    clean_name = ''.join(c for c in clean_name if c.isalnum() or c == '.')
-    domains = ["kp.raftworld.ru", "member.kp.ru", "team.kp.ru"]
-    domain = random.choice(domains)
-    return f"{clean_name}@{domain}"
+# ========== ГЕНЕРАЦИЯ EMAIL ==========
+def generate_email(discord_name, telegram):
+    """Генерирует email в формате telegram+discord@kp.raftworld.ru"""
+    # Очищаем имена от спецсимволов
+    discord_clean = discord_name.lower().replace('@', '').replace(' ', '').replace('#', '')
+    telegram_clean = telegram.lower().replace('@', '').replace(' ', '').replace('#', '')
+    
+    # Если есть telegram, используем его + discord
+    if telegram_clean:
+        # Берем первую часть telegram (до @ если есть)
+        telegram_part = telegram_clean.split('@')[0]
+        # Формируем email: telegram+discord@kp.raftworld.ru
+        return f"{telegram_part}+{discord_clean}@kp.raftworld.ru"
+    else:
+        # Если нет telegram, только discord
+        return f"{discord_clean}@kp.raftworld.ru"
 
-def generate_password(length=10):
+def generate_password(length=12):
     """Генерирует случайный пароль"""
     chars = string.ascii_letters + string.digits
     return ''.join(random.choice(chars) for _ in range(length))
+
+# ========== ОТПРАВКА ДАННЫХ НА САЙТ ==========
+async def send_to_site(user_data):
+    """Отправляет данные пользователя на сайт"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{API_URL}/update_user.php", json=user_data) as resp:
+                if resp.status == 200:
+                    print(f"✅ Данные отправлены на сайт")
+                else:
+                    print(f"❌ Ошибка отправки на сайт: {resp.status}")
+    except Exception as e:
+        print(f"❌ Ошибка соединения с сайтом: {e}")
+
+# ========== УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ С САЙТА ==========
+async def delete_from_site(user_id):
+    """Удаляет пользователя с сайта"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{API_URL}/delete_user.php", json={"user_id": user_id}) as resp:
+                if resp.status == 200:
+                    print(f"✅ Пользователь {user_id} удален с сайта")
+                else:
+                    print(f"❌ Ошибка удаления с сайта: {resp.status}")
+    except Exception as e:
+        print(f"❌ Ошибка соединения с сайтом: {e}")
 
 # ========== ЗАГРУЗКА КАНАЛОВ ==========
 async def load_channels():
@@ -165,7 +204,7 @@ ROLES_CAN_SEE_PRIVATE_CHANNELS = [ROLE_GL_MODER_ID, ROLE_ADMIN_ID]
 async def on_ready():
     print(f'✅ Бот {bot.user} успешно запущен!')
     print(f'📋 Серверов: {len(bot.guilds)}')
-    print(f'👥 Команды загружены: !accept, !повышение, !бан, !чсп, !снят, !мут, !размут, !варн, !варны, !снятьварны')
+    print(f'👥 Команды загружены: !accept, !повышение, !бан, !чсп, !снят, !мут, !размут, !варн, !варны, !снятьварны, !clear')
     print(f'📝 Категория для личных каналов: {PRIVATE_CATEGORY_ID}')
     print(f'📋 Канал логов: {LOG_CHANNEL_ID}')
     print(f'📝 Канал заявок: {APPLICATION_CHANNEL_ID}')
@@ -188,7 +227,7 @@ async def on_member_join(member):
         embed = discord.Embed(
             title="🎉 Добро пожаловать на RaftWorld KP!",
             description=f"Привет, {member.mention}!\n\n"
-                       f"Для получения доступа к серверу, заполните заявку в канале **📝-заполнение-заявки**\n\n"
+                       f"Для получения доступа к серверу, заполните заявку в канале <#{APPLICATION_CHANNEL_ID}>\n\n"
                        f"**Шаблон заявки:**\n{APPLICATION_TEMPLATE}",
             color=discord.Color.blue()
         )
@@ -296,8 +335,8 @@ async def check_application(message):
 async def save_application(member, data, screenshot_url):
     """Сохраняет заявку и отправляет данные"""
     
-    # Генерируем email и пароль
-    email = generate_email(data.get('name', member.name))
+    # Генерируем email в формате telegram+discord@kp.raftworld.ru
+    email = generate_email(data.get('discord', ''), data.get('telegram', ''))
     password = generate_password(12)
     
     # Сохраняем в JSON
@@ -590,6 +629,15 @@ def has_unpunish_permission(member):
         return True
     return False
 
+def has_clear_permission(member):
+    """Проверяет право на !clear (только Admin и Зам.Куратора)"""
+    if member.guild_permissions.administrator:
+        return True
+    for role in member.roles:
+        if role.id in [ROLE_ADMIN_ID, 1471152313883299860]:  # Admin и Зам.Куратора
+            return True
+    return False
+
 # ========== КОМАНДА ACCEPT ==========
 @bot.command(name='accept')
 async def accept(ctx, *, args: str = ""):
@@ -621,6 +669,25 @@ async def accept(ctx, *, args: str = ""):
         
         # Проверяем наличие заявки
         app_data = applications.get(member.id)
+        
+        # Если есть заявка, отправляем данные на сайт
+        if app_data:
+            # Подготавливаем данные для сайта
+            site_data = {
+                "user_id": member.id,
+                "discord": app_data.get('discord'),
+                "telegram": app_data.get('telegram'),
+                "name": app_data.get('name'),
+                "email": app_data.get('email'),
+                "password": app_data.get('password'),
+                "role": "Участник",
+                "status": "active",
+                "join_date": datetime.now().strftime("%d.%m.%Y"),
+                "avatar": "👤"
+            }
+            
+            # Отправляем на сайт
+            await send_to_site(site_data)
         
         # Удаляем роли ожидания
         roles_to_remove = []
@@ -668,6 +735,98 @@ async def accept(ctx, *, args: str = ""):
     finally:
         if member.id in processing_users:
             processing_users.remove(member.id)
+
+# ========== КОМАНДА CLEAR ==========
+@bot.command(name='clear')
+async def clear_user(ctx, *, args: str = ""):
+    """Полная очистка пользователя: удаление всех ролей, удаление с сайта, кик с сервера"""
+    if not has_clear_permission(ctx.author):
+        await ctx.send("❌ У вас нет прав для использования этой команды! Только Admin и Зам.Куратора.")
+        return
+    
+    member = await get_member_from_args(ctx, args.split() if args else [])
+    
+    if not member:
+        await ctx.send("❌ Укажите пользователя через @ или ответьте на его сообщение!\n"
+                      "Пример: `!clear @пользователь`")
+        return
+    
+    # Запрашиваем подтверждение
+    confirm_msg = await ctx.send(
+        f"⚠️ **ВНИМАНИЕ!**\n"
+        f"Вы собираетесь полностью очистить {member.mention}:\n"
+        f"• Удалить ВСЕ роли\n"
+        f"• Удалить с сайта\n"
+        f"• Кикнуть с сервера\n\n"
+        f"Для подтверждения напишите `!clear_confirm {member.id}` в течение 30 секунд."
+    )
+    
+    # Ждем 30 секунд
+    await asyncio.sleep(30)
+    await confirm_msg.delete()
+
+@bot.command(name='clear_confirm')
+async def clear_confirm(ctx, user_id: int = None):
+    """Подтверждение очистки пользователя"""
+    if not has_clear_permission(ctx.author):
+        await ctx.send("❌ У вас нет прав для использования этой команды!")
+        return
+    
+    if not user_id:
+        await ctx.send("❌ Укажите ID пользователя!")
+        return
+    
+    member = ctx.guild.get_member(user_id)
+    
+    if not member:
+        await ctx.send("❌ Пользователь не найден на сервере!")
+        return
+    
+    try:
+        # 1. Удаляем все роли
+        roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove, reason=f"Clear от {ctx.author}")
+        
+        # 2. Удаляем личный канал
+        await delete_private_channel(member)
+        
+        # 3. Удаляем с сайта
+        await delete_from_site(member.id)
+        
+        # 4. Удаляем из локальных файлов
+        if member.id in applications:
+            del applications[member.id]
+            save_applications()
+        
+        if str(member.id) in warns:
+            del warns[str(member.id)]
+            save_warns()
+        
+        # 5. Кикаем с сервера
+        await member.kick(reason=f"Clear от {ctx.author}")
+        
+        # Отправляем подтверждение
+        embed = discord.Embed(
+            title="🧹 CLEAR",
+            description=f"Пользователь **{member}** (ID: {member.id}) полностью очищен",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Модератор", value=ctx.author.mention, inline=False)
+        embed.add_field(name="Действия", value="• Все роли удалены\n• Удален с сайта\n• Кикнут с сервера", inline=False)
+        await ctx.send(embed=embed)
+        
+        await log_to_channel(
+            guild=ctx.guild,
+            title="🧹 CLEAR",
+            description=f"**Модератор:** {ctx.author.mention}\n"
+                       f"**Пользователь:** {member} (ID: {member.id})\n"
+                       f"**Действие:** Полная очистка (роли, сайт, кик)",
+            color=discord.Color.red()
+        )
+        
+    except Exception as e:
+        await ctx.send(f"❌ Ошибка при очистке: {str(e)}")
 
 # ========== КОМАНДА ПОВЫШЕНИЕ ==========
 @bot.command(name='повышение')
@@ -844,6 +1003,7 @@ async def ban(ctx, *, args: str = ""):
 
     try:
         await delete_private_channel(member)
+        await delete_from_site(member.id)
 
         try:
             await remove_all_roles_except(member, [])
@@ -1243,4 +1403,3 @@ if __name__ == "__main__":
         bot.run(token)
     except Exception as e:
         print(f"❌ Ошибка при запуске: {e}")
-
